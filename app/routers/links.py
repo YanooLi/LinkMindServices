@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.db import get_session
 from app.models import AnalysisStatus, ClickEvent, Link, RiskLevel, User
 from app.schemas import BatchResult, DailyClicks, LinkBatchCreate, LinkCreate, LinkOut, LinkPage, LinkStats
+from app.demo import get_writable_user
 from app.security import get_current_user
 from app.services import enqueue_analysis, to_out, unique_code
 
@@ -24,7 +25,7 @@ async def _owned(session: AsyncSession, link_id: int, user: User) -> Link:
 
 @router.post("", response_model=LinkOut, status_code=201)
 async def create_link(body: LinkCreate, request: Request, background: BackgroundTasks,
-                      user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+                      user: User = Depends(get_writable_user), session: AsyncSession = Depends(get_session)):
     await cache.rate_limit(request, "create", str(user.id))
     if body.alias:
         if await session.scalar(select(Link.id).where(Link.short_code == body.alias)):
@@ -41,7 +42,7 @@ async def create_link(body: LinkCreate, request: Request, background: Background
 
 @router.post("/batch", response_model=BatchResult, status_code=201)
 async def create_batch(body: LinkBatchCreate, request: Request, background: BackgroundTasks,
-                       user: User = Depends(get_current_user), session: AsyncSession = Depends(get_session)):
+                       user: User = Depends(get_writable_user), session: AsyncSession = Depends(get_session)):
     """Create many links in one transaction and queue one analysis job per link."""
     limit = get_settings().batch_max_urls
     if len(body.urls) > limit:
@@ -81,7 +82,7 @@ async def get_link(link_id: int, user: User = Depends(get_current_user), session
 
 
 @router.delete("/{link_id}", status_code=204)
-async def delete_link(link_id: int, user: User = Depends(get_current_user),
+async def delete_link(link_id: int, user: User = Depends(get_writable_user),
                       session: AsyncSession = Depends(get_session)):
     link = await _owned(session, link_id, user)
     code = link.short_code
@@ -91,7 +92,7 @@ async def delete_link(link_id: int, user: User = Depends(get_current_user),
 
 
 @router.post("/{link_id}/reanalyze", response_model=LinkOut)
-async def reanalyze(link_id: int, background: BackgroundTasks, user: User = Depends(get_current_user),
+async def reanalyze(link_id: int, background: BackgroundTasks, user: User = Depends(get_writable_user),
                     session: AsyncSession = Depends(get_session)):
     link = await _owned(session, link_id, user)
     link.status = AnalysisStatus.pending

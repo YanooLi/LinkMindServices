@@ -1,9 +1,7 @@
 import asyncio
 from logging.config import fileConfig
 
-from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
@@ -21,10 +19,9 @@ if config.config_file_name is not None:
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
 from app.config import get_settings  # noqa: E402
-from app.db import Base  # noqa: E402
+from app.db import Base, make_engine, normalize_url  # noqa: E402
 from app import models  # noqa: E402,F401  (registers tables)
 
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
 target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
@@ -45,7 +42,7 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = normalize_url(get_settings().database_url)[0]
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -70,11 +67,8 @@ async def run_async_migrations() -> None:
 
     """
 
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    # Same URL handling as the app (provider URLs such as Neon's ?sslmode=require work unchanged).
+    connectable = make_engine()
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

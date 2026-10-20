@@ -38,6 +38,19 @@ class Settings(BaseSettings):
     safe_browsing_api_key: str = ""
     fetch_page_metadata: bool = True
 
+    # Hosted deployment (docs/DEPLOY.md)
+    embedded_workers: bool = False         # run the RabbitMQ + Kafka consumers inside the API process
+    registration_invite_code: str = ""     # when set, /register requires it (keeps a public shortener from abuse)
+    demo_email: str = ""                   # when set, a read-only demo account with sample links is seeded
+    demo_password: str = ""
+    kafka_security_protocol: str = "PLAINTEXT"   # SASL_SSL for hosted Kafka (e.g. Aiven)
+    kafka_sasl_mechanism: str = "SCRAM-SHA-256"
+    kafka_username: str = ""
+    kafka_password: str = ""
+    kafka_ca_cert: str = ""                # PEM text of the provider's CA certificate
+    kafka_access_cert: str = ""            # PEM client certificate (Aiven "Client certificate" auth, protocol SSL)
+    kafka_access_key: str = ""             # PEM client key
+
     analysis_queue: str = "link.analyze"
     clicks_topic: str = "link.clicks"
 

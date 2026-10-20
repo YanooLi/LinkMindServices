@@ -1,0 +1,30 @@
+# Render Blueprint: one free web service running the API plus the RabbitMQ/Kafka consumers (EMBEDDED_WORKERS).
+# Managed data services live elsewhere (Neon, Upstash, CloudAMQP, Aiven) — fill their URLs in the dashboard.
+services:
+  - type: web
+    name: linkmind-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - {key: PYTHON_VERSION, value: 3.12.7}
+      - {key: EMBEDDED_WORKERS, value: "true"}
+      - {key: JWT_SECRET, generateValue: true}
+      - {key: DEMO_EMAIL, value: demo@linkmind.dev}
+      - {key: DEMO_PASSWORD, sync: false}
+      - {key: REGISTRATION_INVITE_CODE, sync: false}
+      - {key: PUBLIC_BASE_URL, sync: false}
+      - {key: CORS_ORIGINS, sync: false}
+      - {key: DATABASE_URL, sync: false}
+      - {key: REDIS_URL, sync: false}
+      - {key: RABBITMQ_URL, sync: false}
+      - {key: KAFKA_BOOTSTRAP, sync: false}
+      - {key: KAFKA_SECURITY_PROTOCOL, value: SSL}
+      - {key: KAFKA_CA_CERT, sync: false}
+      - {key: KAFKA_ACCESS_CERT, sync: false}
+      - {key: KAFKA_ACCESS_KEY, sync: false}
+      - {key: OPENAI_API_KEY, sync: false}
+      - {key: SAFE_BROWSING_API_KEY, sync: false}
+      - {key: HUGGINGFACE_TOKEN, sync: false}

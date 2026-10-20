@@ -9,10 +9,37 @@ When a broker is disabled (tests, a laptop without Docker), the API falls back t
 """
 import json
 import logging
+import os
+import tempfile
 
 from app.config import get_settings
 
 log = logging.getLogger(__name__)
+
+
+def _pem_file(pem: str) -> str:
+    fd, path = tempfile.mkstemp(suffix=".pem")
+    with os.fdopen(fd, "w") as f:
+        f.write(pem.replace("\\n", "\n"))
+    return path
+
+
+def kafka_kwargs() -> dict:
+    """Connection settings shared by the producer and the consumer; SASL_SSL for hosted Kafka (Aiven)."""
+    s = get_settings()
+    kw = {"bootstrap_servers": s.kafka_bootstrap, "security_protocol": s.kafka_security_protocol}
+    if s.kafka_security_protocol in ("SSL", "SASL_SSL"):
+        from aiokafka.helpers import create_ssl_context
+
+        certfile = keyfile = None
+        if s.kafka_access_cert and s.kafka_access_key:
+            # ssl needs files for the client certificate; write the PEM env vars to private temp files.
+            certfile, keyfile = _pem_file(s.kafka_access_cert), _pem_file(s.kafka_access_key)
+        kw["ssl_context"] = create_ssl_context(cadata=s.kafka_ca_cert or None, certfile=certfile, keyfile=keyfile)
+    if s.kafka_security_protocol.startswith("SASL"):
+        kw.update(sasl_mechanism=s.kafka_sasl_mechanism, sasl_plain_username=s.kafka_username,
+                  sasl_plain_password=s.kafka_password)
+    return kw
 
 
 class AnalysisPublisher:
@@ -67,7 +94,7 @@ class ClickPublisher:
         from aiokafka import AIOKafkaProducer
 
         try:
-            self._producer = AIOKafkaProducer(bootstrap_servers=s.kafka_bootstrap, linger_ms=20)
+            self._producer = AIOKafkaProducer(linger_ms=20, **kafka_kwargs())
             await self._producer.start()
         except Exception as exc:
             log.warning("Kafka unavailable (%s); clicks will be written directly", exc)

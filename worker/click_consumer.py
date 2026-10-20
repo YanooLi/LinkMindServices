@@ -1,7 +1,8 @@
 """Kafka consumer: batches click events into PostgreSQL.
 
 Reads up to BATCH events (or whatever arrived within 500 ms), writes them in one transaction, then commits
-the Kafka offsets, so a crash replays at most one batch instead of losing clicks.
+the Kafka offsets, so a crash replays at most one batch instead of losing clicks. Runs standalone or inside the
+API process (EMBEDDED_WORKERS=true).
 """
 import asyncio
 import json
@@ -12,17 +13,17 @@ from aiokafka import AIOKafkaConsumer
 
 from app import db
 from app.config import get_settings
+from app.messaging import kafka_kwargs
 from app.services import persist_clicks
 
 BATCH = int(os.environ.get("CLICK_BATCH", "500"))
 log = logging.getLogger("click_consumer")
 
 
-async def main() -> None:
-    logging.basicConfig(level=logging.INFO)
+async def run() -> None:
     s = get_settings()
-    consumer = AIOKafkaConsumer(s.clicks_topic, bootstrap_servers=s.kafka_bootstrap, group_id="click-writer",
-                                enable_auto_commit=False, auto_offset_reset="earliest")
+    consumer = AIOKafkaConsumer(s.clicks_topic, group_id="click-writer", enable_auto_commit=False,
+                                auto_offset_reset="earliest", **kafka_kwargs())
     await consumer.start()
     log.info("consuming %s", s.clicks_topic)
     try:
@@ -40,4 +41,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run())

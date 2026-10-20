@@ -8,6 +8,13 @@ from app.models import AnalysisStatus, RiskLevel
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+    invite_code: str | None = None
+
+
+class PublicConfig(BaseModel):
+    registration_requires_invite: bool
+    demo_email: str | None
+    demo_password: str | None
 
 
 class UserOut(BaseModel):
