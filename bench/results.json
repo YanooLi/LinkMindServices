@@ -1,0 +1,47 @@
+[
+ {
+  "label": "cache-on",
+  "when": "2026-10-20T01:23:05+00:00",
+  "machine": "Darwin arm64 (10 cpu)",
+  "concurrency": 50,
+  "seconds": 19.6,
+  "requests": 11649,
+  "errors": 0,
+  "rps": 595.3,
+  "p50_ms": 53.42,
+  "p95_ms": 244.33,
+  "p99_ms": 559.17,
+  "mean_ms": 83.89,
+  "links": 1000
+ },
+ {
+  "label": "cache-off",
+  "when": "2026-10-20T01:23:40+00:00",
+  "machine": "Darwin arm64 (10 cpu)",
+  "concurrency": 50,
+  "seconds": 19.6,
+  "requests": 6849,
+  "errors": 0,
+  "rps": 349.4,
+  "p50_ms": 87.65,
+  "p95_ms": 472.91,
+  "p99_ms": 784.21,
+  "mean_ms": 142.8,
+  "links": 1000
+ },
+ {
+  "label": "cache-on",
+  "when": "2026-10-20T01:24:07+00:00",
+  "machine": "Darwin arm64 (10 cpu)",
+  "concurrency": 50,
+  "seconds": 19.8,
+  "requests": 11341,
+  "errors": 0,
+  "rps": 572.2,
+  "p50_ms": 55.03,
+  "p95_ms": 270.64,
+  "p99_ms": 489.9,
+  "mean_ms": 87.26,
+  "links": 1000
+ }
+]

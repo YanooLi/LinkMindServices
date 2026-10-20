@@ -1,0 +1,67 @@
+# Full stack: docker compose up --build   (API on :8000, RabbitMQ UI on :15672)
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_USER: linkmind, POSTGRES_PASSWORD: linkmind, POSTGRES_DB: linkmind}
+    ports: ["5433:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U linkmind"], interval: 3s, retries: 20}
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6380:6379"]
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck: {test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"], interval: 5s, retries: 30}
+
+  kafka:
+    image: apache/kafka:3.8.0
+    ports: ["9092:9092"]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: INTERNAL://:29092,EXTERNAL://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:29092,EXTERNAL://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+
+  api:
+    build: .
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2"
+    env_file: [.env]
+    environment: &svc_env
+      DATABASE_URL: postgresql+asyncpg://linkmind:linkmind@postgres:5432/linkmind
+      REDIS_URL: redis://redis:6379/0
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
+      KAFKA_BOOTSTRAP: kafka:29092
+    ports: ["8000:8000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      redis: {condition: service_started}
+      kafka: {condition: service_started}
+
+  analysis-worker:
+    build: .
+    command: python -m worker.analysis_worker
+    env_file: [.env]
+    environment: *svc_env
+    depends_on: [api]
+
+  click-consumer:
+    build: .
+    command: python -m worker.click_consumer
+    env_file: [.env]
+    environment: *svc_env
+    restart: on-failure
+    depends_on: [api]
+
+volumes:
+  pgdata:
