@@ -18,3 +18,9 @@ async def test_qr_validation_and_delete(client, auth):
     q = (await client.post("/qrcode/", json={"target_url": "https://example.com/q"}, headers=auth)).json()
     assert (await client.delete(f"/qrcode/{q['qr_code_id']}", headers=auth)).status_code == 204
     assert (await client.get(f"/qrcode/{q['qr_code_id']}/image")).status_code == 404
+
+
+async def test_qr_preview_requires_auth_and_renders(client, auth):
+    assert (await client.get("/qrcode/preview?target_url=https://example.com")).status_code == 401
+    r = await client.get("/qrcode/preview?target_url=https://example.com&color=%23DC2626&style=rounded", headers=auth)
+    assert r.status_code == 200 and r.content[:4] == b"\x89PNG"

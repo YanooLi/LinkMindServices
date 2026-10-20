@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     public_base_url: str = "http://localhost:8000"
     cors_origins: str = "http://localhost:5173"
     cache_ttl_seconds: int = 3600
-    rate_limit_per_minute: int = 60
+    rate_limit_per_minute: int = 120   # per user/IP per bucket; the QR live preview calls once per edit pause
     batch_max_urls: int = 100
 
     # Optional AI / security providers. Every one degrades gracefully when its key is empty.

@@ -48,6 +48,17 @@ def render_png(data: str, color: str, style: str, size: int = 10) -> bytes:
     return buf.getvalue()
 
 
+@router.get("/qrcode/preview", responses={200: {"content": {"image/png": {}}}})
+async def qr_preview(request: Request, target_url: str = Query(min_length=1, max_length=2048),
+                     color: str = Query("#000000", pattern=r"^#[0-9A-Fa-f]{6}$"),
+                     style: str = Query("square", pattern=r"^(square|rounded|dots)$"),
+                     user: User = Depends(get_current_user)):
+    """Live preview for the QR Generator: renders the destination itself in the chosen color and style. Nothing is
+    stored; the real code (created by POST /qrcode/) encodes the tracked /qrcode/{id} URL instead."""
+    await cache.rate_limit(request, "qr-preview", str(user.id))
+    return Response(render_png(target_url, color, style, 8), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
 @router.get("/qrcode/{qr_code_id}/image", responses={200: {"content": {"image/png": {}}}})
 async def qr_image(qr_code_id: str, size: int = Query(10, ge=4, le=20), session: AsyncSession = Depends(get_session)):
     """PNG generated on demand; it encodes the tracked /qrcode/{id} URL so every scan is counted."""
