@@ -1,6 +1,7 @@
 """Settings, read from environment variables / .env (see .env.example)."""
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,7 +20,7 @@ class Settings(BaseSettings):
     rabbitmq_enabled: bool = True
     kafka_enabled: bool = True
 
-    jwt_secret: str = "change-me-in-production"
+    jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60 * 24
 
@@ -39,6 +40,15 @@ class Settings(BaseSettings):
 
     analysis_queue: str = "link.analyze"
     clicks_topic: str = "link.clicks"
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _strong_secret(cls, v: str) -> str:
+        # Several API processes must share one secret, so it is never generated at startup.
+        if len(v) < 32:
+            raise ValueError('JWT_SECRET must be set to 32+ characters in .env; generate one with: '
+                             'python3 -c "import secrets;print(secrets.token_hex(32))"')
+        return v
 
 
 @lru_cache

@@ -9,7 +9,7 @@ optional) · Docker Compose · pytest
 
 ## Run everything
 ```bash
-cp .env.example .env            # API keys are optional
+cp .env.example .env            # then set JWT_SECRET (required); API keys are optional
 docker compose up --build       # API http://localhost:8000/docs · RabbitMQ UI http://localhost:15672
 ```
 
