@@ -53,3 +53,18 @@ async def test_reanalyze_queues(client, auth):
     u = (await client.post("/shorten/", json={"target_url": "https://example.com/r"}, headers=auth)).json()
     r = await client.post(f"/ai/reanalyze/url/{u['short_code']}", headers=auth)
     assert r.status_code == 202 and r.json()["message"] == "Re-analysis queued"
+
+
+async def test_custom_alias(client, auth):
+    r = await client.post("/shorten/", json={"target_url": "https://www.cmu.edu/", "custom_alias": "cmu-home"}, headers=auth)
+    assert r.status_code == 201 and r.json()["short_code"] == "cmu-home" and r.json()["short_url"].endswith("/cmu-home")
+    redirect = await client.get("/cmu-home")
+    assert redirect.status_code in (302, 307) and redirect.headers["location"] == "https://www.cmu.edu/"
+    # taken (case-insensitively), reserved, or malformed aliases are refused
+    dup = await client.post("/shorten/", json={"target_url": "https://example.com", "custom_alias": "CMU-Home"}, headers=auth)
+    assert dup.status_code == 409 and "taken" in dup.json()["detail"]
+    reserved = await client.post("/shorten/", json={"target_url": "https://example.com", "custom_alias": "docs"}, headers=auth)
+    assert reserved.status_code == 409 and "reserved" in reserved.json()["detail"]
+    for bad in ("-lead", "trail-", "has space", "slash/es", "a" * 33, "emoji😀"):
+        assert (await client.post("/shorten/", json={"target_url": "https://example.com", "custom_alias": bad},
+                                  headers=auth)).status_code == 422, bad

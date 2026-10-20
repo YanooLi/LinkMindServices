@@ -1,6 +1,7 @@
 """docs/SmartUrl-api.md §2.1 and §5.1: create short URLs and list the user's history. Plus batch create and delete."""
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import cache
@@ -10,7 +11,7 @@ from app.demo import get_writable_user
 from app.models import AiAnalysis, Url, User
 from app.schemas import ShortenBatchIn, ShortenIn, UrlHistory, UrlOut
 from app.security import get_current_user
-from app.services import analyses_for, enqueue_analysis, unique_code, url_out
+from app.services import RESERVED, analyses_for, enqueue_analysis, unique_code, url_out
 
 router = APIRouter(tags=["short urls"])
 
@@ -20,10 +21,24 @@ async def shorten(body: ShortenIn, request: Request, background: BackgroundTasks
                   user: User = Depends(get_writable_user), session: AsyncSession = Depends(get_session)):
     """Analysis runs asynchronously: `ai_analysis` is null until the worker finishes (poll /ai/analysis/url/{code})."""
     await cache.rate_limit(request, "create", str(user.id))
+    if body.custom_alias:
+        alias = body.custom_alias
+        if alias.lower() in RESERVED:
+            raise HTTPException(409, f"'{alias}' is reserved. Choose another custom back-half")
+        # Case-insensitive so "I20" and "i20" can't point to different places.
+        if await session.scalar(select(Url.id).where(func.lower(Url.short_code) == alias.lower())):
+            raise HTTPException(409, f"'{alias}' is already taken. Choose another custom back-half")
+        code = alias
+    else:
+        code = await unique_code(session, Url, Url.short_code)
     url = Url(user_id=user.id, original_url=str(body.target_url), title=body.title or None, ai_enabled=body.ai_enabled,
-              short_code=await unique_code(session, Url, Url.short_code))
+              short_code=code)
     session.add(url)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:          # lost a race for the same alias
+        await session.rollback()
+        raise HTTPException(409, f"'{code}' is already taken. Choose another custom back-half")
     await enqueue_analysis([("url", url.short_code)], background)
     return url_out(url, None)
 

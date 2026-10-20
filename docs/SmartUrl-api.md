@@ -216,7 +216,7 @@ Each resource (URL, QR code) automatically extracts and stores the title of the 
 
 #### 2.1. Create Short URL
 
-**Purpose:** Convert a long URL into a short URL with a randomly generated code. Automatically extracts website title and runs AI safety/classification analysis.
+**Purpose:** Convert a long URL into a short URL with a randomly generated code, or a custom back-half you choose. Automatically extracts website title and runs AI safety/classification analysis.
 
 **Endpoint:** `/shorten/`
 
@@ -228,9 +228,15 @@ Each resource (URL, QR code) automatically extracts and stores the title of the 
 **Request Body:**
 ```json
 {
-  "target_url": "https://example.com/your/long/url"
+  "target_url": "https://example.com/your/long/url",
+  "title": "Optional private label shown in your history and analytics",
+  "ai_enabled": true,
+  "custom_alias": "my-link"
 }
 ```
+`title`, `ai_enabled` and `custom_alias` are optional. `custom_alias` becomes the short code
+(`http://localhost:8000/my-link`): 1–32 letters, digits or inner dashes, unique case-insensitively, and not a reserved
+API path (`docs`, `health`, `auth`, …).
 
 **Response:** (201 Created)
 ```json
@@ -254,6 +260,8 @@ Each resource (URL, QR code) automatically extracts and stores the title of the 
 **Error Responses:**
 - 400 Bad Request: Invalid URL format
 - 403 Forbidden: URL flagged as malicious by AI analysis
+- 409 Conflict: `custom_alias` is already taken or reserved
+- 422 Unprocessable Entity: `custom_alias` has invalid characters or length
 
 **Note:** The AI analysis runs asynchronously via the message queue. If the analysis is still pending at the time of response, `ai_analysis` will be `null` and the result will be available via the AI analysis endpoint.
 

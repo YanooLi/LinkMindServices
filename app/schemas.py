@@ -74,10 +74,15 @@ class AnalysisBrief(BaseModel):
     checked_at: datetime
 
 
+ALIAS = r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,30}[A-Za-z0-9])?$"
+
+
 class ShortenIn(BaseModel):
     target_url: HttpUrl
     title: str | None = Field(default=None, max_length=200)
     ai_enabled: bool = True
+    # Optional custom back-half (linkmind.../my-link): 1-32 letters, digits or inner dashes; unique case-insensitively.
+    custom_alias: str | None = Field(default=None, pattern=ALIAS)
 
 
 class ShortenBatchIn(BaseModel):
