@@ -1,9 +1,14 @@
-"""Relational schema: users own links; each link has an AI/security analysis and a stream of click events."""
-import enum
+"""Relational schema, following docs/SmartUrl-database-schema.md (Sui Yeung's design).
+
+users ─┬─< urls       (user_id ON DELETE SET NULL: links keep working after the account is deleted)
+       └─< qrcodes
+ai_analyses: one row per resource (resource_type, resource_id) — 'url'/'qrcode' + short_code/qr_code_id
+analytics:   one row per click or scan event, with device type, country and referrer
+"""
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, Enum, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
 
@@ -12,59 +17,93 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class AnalysisStatus(str, enum.Enum):
-    pending = "pending"
-    done = "done"
-    failed = "failed"
-
-
-class RiskLevel(str, enum.Enum):
-    unknown = "unknown"
-    safe = "safe"
-    suspicious = "suspicious"
-    malicious = "malicious"
-
-
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (Index("idx_auth_provider", "auth_provider", "auth_provider_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(100))
+    username: Mapped[str] = mapped_column(Text, unique=True)
+    email: Mapped[str] = mapped_column(Text, unique=True)
+    password_hash: Mapped[str | None] = mapped_column(Text, nullable=True)        # NULL for OAuth users
+    auth_provider: Mapped[str | None] = mapped_column(Text, nullable=True)       # NULL = local, "google" later
+    auth_provider_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    first_name: Mapped[str | None] = mapped_column(Text, nullable=True)          # Settings › Profile
+    last_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    bio: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
-    links: Mapped[list["Link"]] = relationship(back_populates="owner", cascade="all, delete-orphan")
 
-
-class Link(Base):
-    __tablename__ = "links"
-    __table_args__ = (Index("ix_links_owner_created", "owner_id", "created_at"),)
+class Url(Base):
+    __tablename__ = "urls"
+    __table_args__ = (Index("idx_urls_user", "user_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    short_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     original_url: Mapped[str] = mapped_column(Text)
-    title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    short_code: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clicks: Mapped[int] = mapped_column(Integer, default=0)
+    is_safe: Mapped[bool] = mapped_column(Boolean, default=True)
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)              # Create Link › "Enable AI Analysis"
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    click_count: Mapped[int] = mapped_column(Integer, default=0)
-
-    status: Mapped[AnalysisStatus] = mapped_column(Enum(AnalysisStatus, name="analysis_status"),
-                                                   default=AnalysisStatus.pending)
-    risk_level: Mapped[RiskLevel] = mapped_column(Enum(RiskLevel, name="risk_level"), default=RiskLevel.unknown)
-    risk_reasons: Mapped[list] = mapped_column(JSON, default=list)
-    category: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    category_source: Mapped[str | None] = mapped_column(String(30), nullable=True)
-    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-    owner: Mapped[User] = relationship(back_populates="links")
 
 
-class ClickEvent(Base):
-    __tablename__ = "click_events"
-    __table_args__ = (Index("ix_clicks_link_time", "link_id", "clicked_at"),)
+class QrCode(Base):
+    __tablename__ = "qrcodes"
+    __table_args__ = (Index("idx_qrcodes_user", "user_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    link_id: Mapped[int] = mapped_column(ForeignKey("links.id", ondelete="CASCADE"))
-    clicked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
-    referrer: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    user_agent: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    original_url: Mapped[str] = mapped_column(Text)
+    qr_code_id: Mapped[str] = mapped_column(Text, unique=True, index=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    scans: Mapped[int] = mapped_column(Integer, default=0)
+    is_safe: Mapped[bool] = mapped_column(Boolean, default=True)
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    color: Mapped[str] = mapped_column(String(7), default="#000000")             # QR Generator › Brand color
+    style: Mapped[str] = mapped_column(String(16), default="square")             # QR Generator › QR style
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AiAnalysis(Base):
+    __tablename__ = "ai_analyses"
+    __table_args__ = (
+        UniqueConstraint("resource_type", "resource_id"),
+        Index("idx_ai_resource", "resource_type", "resource_id"),
+        Index("idx_ai_is_safe", "is_safe"),
+        Index("idx_ai_category", "category"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource_type: Mapped[str] = mapped_column(Text)            # "url" | "qrcode"
+    resource_id: Mapped[str] = mapped_column(Text)              # short_code | qr_code_id
+    status: Mapped[str] = mapped_column(Text, default="pending")  # pending | done | failed
+    category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_safe: Mapped[bool] = mapped_column(Boolean, default=True)
+    safety_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    threat_types: Mapped[list] = mapped_column(JSON, default=list)   # TEXT[] in the design; JSON keeps SQLite tests working
+    reasons: Mapped[list] = mapped_column(JSON, default=list)        # human-readable explanation of the score
+    ai_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    google_safe_browsing_safe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    google_safe_browsing_threats: Mapped[list] = mapped_column(JSON, default=list)
+    analyzed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class AnalyticsEvent(Base):
+    __tablename__ = "analytics"
+    __table_args__ = (
+        Index("idx_resource", "resource_type", "resource_id"),
+        Index("idx_event_date", "event_date"),
+        Index("idx_device_type", "device_type"),
+        Index("idx_country", "country"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    resource_type: Mapped[str] = mapped_column(Text)
+    resource_id: Mapped[str] = mapped_column(Text)
+    event_type: Mapped[str] = mapped_column(Text)               # "click" | "scan"
+    event_date: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    device_type: Mapped[str | None] = mapped_column(Text, nullable=True)   # desktop | mobile | tablet
+    country: Mapped[str | None] = mapped_column(Text, nullable=True)
+    referrer: Mapped[str | None] = mapped_column(Text, nullable=True)      # Analytics › Top Referrers (host only)

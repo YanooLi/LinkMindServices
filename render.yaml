@@ -12,7 +12,7 @@ services:
       - {key: PYTHON_VERSION, value: 3.12.7}
       - {key: EMBEDDED_WORKERS, value: "true"}
       - {key: JWT_SECRET, generateValue: true}
-      - {key: DEMO_EMAIL, value: demo@linkmind.dev}
+      - {key: DEMO_USERNAME, value: demo}
       - {key: DEMO_PASSWORD, sync: false}
       - {key: REGISTRATION_INVITE_CODE, sync: false}
       - {key: PUBLIC_BASE_URL, sync: false}

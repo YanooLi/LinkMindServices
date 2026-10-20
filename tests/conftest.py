@@ -44,10 +44,15 @@ async def client():
 _counter = iter(range(10_000))
 
 
+async def make_user(client, password="correct-horse"):
+    n = next(_counter)
+    r = await client.post("/auth/register", json={"username": f"user{n}", "email": f"user{n}@example.com", "password": password})
+    assert r.status_code == 201, r.text
+    r = await client.post("/auth/login", json={"username": f"user{n}", "password": password})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
 @pytest.fixture
 async def auth(client):
-    email = f"user{next(_counter)}@example.com"
-    r = await client.post("/api/auth/register", json={"email": email, "password": "correct-horse"})
-    assert r.status_code == 201, r.text
-    r = await client.post("/api/auth/token", data={"username": email, "password": "correct-horse"})
-    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+    return {"Authorization": f"Bearer {(await make_user(client))['access_token']}"}

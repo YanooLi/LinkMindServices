@@ -12,7 +12,8 @@ from app.analysis import classifier, fetcher, heuristics
     ("https://apple-id-verify.top/signin", "suspicious"),
 ])
 def test_risk_rules(url, expected):
-    assert heuristics.risk_from_signals(heuristics.url_signals(url)) == expected
+    score, _ = heuristics.score_signals(heuristics.url_signals(url))
+    assert ("safe" if score >= 0.5 else "suspicious") == expected
 
 
 def test_keyword_categories():

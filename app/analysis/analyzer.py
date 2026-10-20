@@ -1,56 +1,81 @@
-"""Run the full analysis for one link and persist it. Called by the RabbitMQ worker (or in-process fallback)."""
+"""Analyze one resource (short URL or QR code) and store the result in ai_analyses (docs/SmartUrl-api.md, AI Analysis
+Pipeline): Google Safe Browsing check → URL heuristics → optional AI classification → composite safety score →
+store, flag the resource (is_safe) and invalidate its cache entry. Called by the RabbitMQ worker or in-process."""
 import logging
 from datetime import datetime, timezone
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import cache
 from app.analysis import classifier, fetcher, heuristics, safebrowsing
 from app.config import get_settings
-from app.models import AnalysisStatus, Link, RiskLevel
+from app.models import AiAnalysis, QrCode, Url
 
 log = logging.getLogger(__name__)
 
 
-async def analyze_link(session: AsyncSession, link_id: int) -> Link | None:
-    s = get_settings()
-    link = await session.get(Link, link_id)
-    if link is None:
-        return None
-    try:
-        reasons = heuristics.url_signals(link.original_url)
-        risk = heuristics.risk_from_signals(reasons)
+async def load_resource(session: AsyncSession, resource_type: str, resource_id: str):
+    if resource_type == "url":
+        return await session.scalar(select(Url).where(Url.short_code == resource_id))
+    return await session.scalar(select(QrCode).where(QrCode.qr_code_id == resource_id))
 
-        threats = await safebrowsing.check(link.original_url, s.safe_browsing_api_key)
+
+async def get_or_create_analysis(session: AsyncSession, resource_type: str, resource_id: str) -> AiAnalysis:
+    row = await session.scalar(select(AiAnalysis).where(AiAnalysis.resource_type == resource_type,
+                                                        AiAnalysis.resource_id == resource_id))
+    if row is None:
+        row = AiAnalysis(resource_type=resource_type, resource_id=resource_id, status="pending")
+        session.add(row)
+    return row
+
+
+async def analyze_resource(session: AsyncSession, resource_type: str, resource_id: str) -> AiAnalysis | None:
+    s = get_settings()
+    res = await load_resource(session, resource_type, resource_id)
+    if res is None:
+        return None
+    row = await get_or_create_analysis(session, resource_type, resource_id)
+    try:
+        url = res.original_url
+        threats = await safebrowsing.check(url, s.safe_browsing_api_key)
+        reasons = heuristics.url_signals(url)
+        score, tags = heuristics.score_signals(reasons)
         if threats:
-            risk = "malicious"
+            score, tags = 0.0, [t.lower() for t in threats] + tags
             reasons = [f"Google Safe Browsing: {t.replace('_', ' ').lower()}" for t in threats] + reasons
-        elif threats is None and not s.safe_browsing_api_key:
+        elif threats is None:
             reasons.append("Google Safe Browsing not checked (no API key configured)")
 
-        title = link.title
-        if s.fetch_page_metadata and risk != "malicious" and not title:
+        if not res.title and s.fetch_page_metadata and score > 0:
             try:
-                title = await fetcher.fetch_title(link.original_url)
+                res.title = await fetcher.fetch_title(url)
             except fetcher.UnsafeURL as exc:
-                reasons.append(f"not fetched: {exc}")
-            except Exception as exc:  # network errors must not fail the whole analysis
-                log.info("title fetch failed for %s: %s", link.original_url, exc)
+                reasons.append(f"title not fetched: {exc}")
+            except Exception as exc:  # network errors must not fail the analysis
+                log.info("title fetch failed for %s: %s", url, exc)
 
-        category, source = await classifier.classify(link.original_url, title, s)
-        if category == "spam" and risk == "safe":
-            risk = "suspicious"
-            reasons.append("classified as spam")
+        category, provider = None, None
+        if res.ai_enabled:
+            category, provider = await classifier.classify(url, res.title, s)
+            if category == "spam":
+                score = max(0.0, round(score - 0.3, 2))
+                tags.append("spam")
+                reasons.append("classified as spam")
 
-        link.title = title
-        link.risk_level = RiskLevel(risk)
-        link.risk_reasons = [r for r in reasons if r]
-        link.category, link.category_source = category, source
-        link.status = AnalysisStatus.done
+        row.category, row.ai_provider = category, provider
+        row.safety_score = score
+        row.is_safe = score >= s.safety_threshold
+        row.threat_types = sorted(set(tags))
+        row.reasons = reasons
+        row.google_safe_browsing_safe = None if threats is None else not threats
+        row.google_safe_browsing_threats = threats or []
+        row.status = "done"
+        res.is_safe = row.is_safe
     except Exception:
-        log.exception("analysis failed for link %s", link_id)
-        link.status = AnalysisStatus.failed
-    link.analyzed_at = datetime.now(timezone.utc)
+        log.exception("analysis failed for %s %s", resource_type, resource_id)
+        row.status = "failed"
+    row.analyzed_at = datetime.now(timezone.utc)
     await session.commit()
-    await cache.invalidate_link(link.short_code)  # the redirect path caches risk_level
-    return link
+    await cache.invalidate(resource_type, resource_id)
+    return row

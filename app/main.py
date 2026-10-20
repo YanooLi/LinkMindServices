@@ -10,7 +10,7 @@ from app import cache
 from app.config import get_settings
 from app.demo import seed_and_analyze
 from app.messaging import analysis_publisher, click_publisher
-from app.routers import auth, links, redirect
+from app.routers import ai, analytics, auth, qrcodes, redirect, urls, users
 
 logging.basicConfig(level=logging.INFO)
 
@@ -42,16 +42,20 @@ async def lifespan(app: FastAPI):
     await click_publisher.stop()
 
 
-app = FastAPI(title="LinkMind API", version="1.0.0", lifespan=lifespan,
-              description="Short links with AI-assisted classification and malicious-URL detection.")
+app = FastAPI(title="LinkMind API", version="2.0.0", lifespan=lifespan,
+              description="Smart URL Processor: short links and QR codes with AI classification, safety scoring and "
+                          "analytics. Endpoints follow docs/SmartUrl-api.md.")
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in get_settings().cors_origins.split(",")],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-app.include_router(auth.router)
-app.include_router(links.router)
-app.include_router(redirect.router)
+
 
 
 @app.get("/health", tags=["health"])
 async def health():
     return {"status": "ok", "rabbitmq": analysis_publisher.enabled, "kafka": click_publisher.enabled,
             "cache": get_settings().cache_enabled}
+
+
+for r in (auth.router, users.router, urls.router, qrcodes.router, ai.router, analytics.router):
+    app.include_router(r)
+app.include_router(redirect.router)   # last: GET /{short_code} must not shadow the routes above

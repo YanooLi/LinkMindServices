@@ -65,12 +65,13 @@ class AnalysisPublisher:
             log.warning("RabbitMQ unavailable (%s); analysis will run in-process", exc)
             self._conn = self._channel = None
 
-    async def publish(self, link_ids: list[int]) -> None:
+    async def publish(self, items: list[tuple[str, str]]) -> None:
+        """One message per resource: {"resource_type": "url"|"qrcode", "resource_id": code}."""
         import aio_pika
 
-        for link_id in link_ids:
+        for resource_type, resource_id in items:
             await self._channel.default_exchange.publish(
-                aio_pika.Message(json.dumps({"link_id": link_id}).encode(),
+                aio_pika.Message(json.dumps({"resource_type": resource_type, "resource_id": resource_id}).encode(),
                                  delivery_mode=aio_pika.DeliveryMode.PERSISTENT),
                 routing_key=get_settings().analysis_queue)
 
@@ -102,7 +103,7 @@ class ClickPublisher:
 
     async def publish(self, event: dict) -> None:
         await self._producer.send(get_settings().clicks_topic, json.dumps(event).encode(),
-                                  key=str(event["link_id"]).encode())
+                                  key=f'{event["resource_type"]}:{event["resource_id"]}'.encode())
 
     async def stop(self) -> None:
         if self._producer is not None:

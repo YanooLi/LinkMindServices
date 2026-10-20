@@ -47,13 +47,29 @@ def url_signals(url: str) -> list[str]:
     return reasons
 
 
-HIGH_SIGNAL = ("uses a raw IP", "contains '@'", "punycode", "mentions '")
-WEAK_SIGNAL = ("not encrypted", "very long URL")
+# Threat tags stored in ai_analyses.threat_types, and how much each signal lowers the 0–1 safety score.
+SIGNAL_TAGS = [
+    # one strong signal alone pushes a link below the 0.5 threshold
+    ("uses a raw IP", "raw_ip_host", 0.55),
+    ("contains '@'", "obfuscated_host", 0.55),
+    ("punycode", "homograph_domain", 0.55),
+    ("mentions '", "brand_impersonation", 0.6),
+    ("top-level domain", "suspicious_tld", 0.15),
+    ("deep subdomain", "deep_subdomains", 0.15),
+    ("another URL shortener", "nested_shortener", 0.15),
+    ("credential-related", "credential_phishing_pattern", 0.2),
+    ("very long URL", "long_url", 0.05),
+    ("not encrypted", "no_https", 0.05),
+]
 
 
-def risk_from_signals(reasons: list[str]) -> str:
-    """One high-signal reason, or two other non-weak reasons, make a link suspicious."""
-    if any(any(h in r for h in HIGH_SIGNAL) for r in reasons):
-        return "suspicious"
-    strong = [r for r in reasons if not any(w in r for w in WEAK_SIGNAL)]
-    return "suspicious" if len(strong) >= 2 else "safe"
+def score_signals(reasons: list[str]) -> tuple[float, list[str]]:
+    """Composite safety score (1.0 = no risk signal) and threat tags for the heuristic reasons."""
+    score, tags = 1.0, []
+    for reason in reasons:
+        for needle, tag, penalty in SIGNAL_TAGS:
+            if needle in reason:
+                score -= penalty
+                tags.append(tag)
+                break
+    return max(0.0, round(score, 2)), tags

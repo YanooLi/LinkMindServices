@@ -29,16 +29,16 @@ RESULTS = os.path.join(HERE, "results.json")
 
 async def setup(base: str, n: int) -> None:
     async with httpx.AsyncClient(base_url=base, timeout=30) as c:
-        email, pw = "bench@example.com", "bench-password"
-        await c.post("/api/auth/register", json={"email": email, "password": pw})
-        tok = (await c.post("/api/auth/token", data={"username": email, "password": pw})).json()["access_token"]
+        user, pw = "bench", "bench-password"
+        await c.post("/auth/register", json={"username": user, "email": "bench@example.com", "password": pw})
+        tok = (await c.post("/auth/login", json={"username": user, "password": pw})).json()["access_token"]
         h = {"Authorization": f"Bearer {tok}"}
         codes = []
         for i in range(0, n, 100):
             urls = [f"https://example.com/bench/{j}" for j in range(i, min(n, i + 100))]
-            r = await c.post("/api/links/batch", json={"urls": urls}, headers=h)
+            r = await c.post("/shorten/batch", json={"target_urls": urls}, headers=h)
             r.raise_for_status()
-            codes += [l["short_code"] for l in r.json()["created"]]
+            codes += [l["short_code"] for l in r.json()]
     json.dump(codes, open(CODES, "w"))
     print(f"created {len(codes)} links -> {CODES}")
 
@@ -55,7 +55,7 @@ async def run(base: str, label: str, seconds: float, concurrency: int) -> None:
         while time.perf_counter() < stop:
             t0 = time.perf_counter()
             try:
-                r = await c.get(f"/r/{random.choice(codes)}")
+                r = await c.get(f"/{random.choice(codes)}")
                 if r.status_code != 307:
                     errors += 1
                     continue
@@ -66,7 +66,7 @@ async def run(base: str, label: str, seconds: float, concurrency: int) -> None:
 
     async with httpx.AsyncClient(base_url=base, timeout=10, limits=limits, follow_redirects=False) as c:
         for _ in range(200):                      # warm-up (fills the cache when it is on)
-            await c.get(f"/r/{random.choice(codes)}")
+            await c.get(f"/{random.choice(codes)}")
         t0 = time.perf_counter()
         await asyncio.gather(*(worker(c) for _ in range(concurrency)))
         elapsed = time.perf_counter() - t0
@@ -84,8 +84,8 @@ async def run(base: str, label: str, seconds: float, concurrency: int) -> None:
 
 def compare() -> None:
     hist = json.load(open(RESULTS))
-    on = next(r for r in reversed(hist) if r["label"] == "cache-on")
-    off = next(r for r in reversed(hist) if r["label"] == "cache-off")
+    on = next(r for r in reversed(hist) if r["label"].startswith("cache-on"))
+    off = next(r for r in reversed(hist) if r["label"].startswith("cache-off"))
     for k in ("p50_ms", "p95_ms", "mean_ms"):
         print(f"{k:8} cache-off {off[k]:8} -> cache-on {on[k]:8}  ({(1 - on[k] / off[k]) * 100:.0f}% lower)")
     print(f"rps      cache-off {off['rps']:8} -> cache-on {on['rps']:8}  ({on['rps'] / off['rps']:.2f}x)")

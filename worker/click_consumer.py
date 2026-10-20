@@ -1,4 +1,4 @@
-"""Kafka consumer: batches click events into PostgreSQL.
+"""Kafka consumer: batches visit events (clicks and scans) into the analytics table.
 
 Reads up to BATCH events (or whatever arrived within 500 ms), writes them in one transaction, then commits
 the Kafka offsets, so a crash replays at most one batch instead of losing clicks. Runs standalone or inside the
@@ -14,7 +14,7 @@ from aiokafka import AIOKafkaConsumer
 from app import db
 from app.config import get_settings
 from app.messaging import kafka_kwargs
-from app.services import persist_clicks
+from app.services import persist_events
 
 BATCH = int(os.environ.get("CLICK_BATCH", "500"))
 log = logging.getLogger("click_consumer")
@@ -33,7 +33,7 @@ async def run() -> None:
             if not events:
                 continue
             async with db.SessionLocal() as session:
-                await persist_clicks(session, events)
+                await persist_events(session, events)
             await consumer.commit()
             log.info("stored %d click events", len(events))
     finally:

@@ -22,7 +22,10 @@ class Settings(BaseSettings):
 
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
-    access_token_minutes: int = 60 * 24
+    jwt_access_expire: int = 3600          # seconds (SmartUrl-api.md: 1 hour)
+    jwt_refresh_expire: int = 604800       # seconds (7 days)
+    trust_forwarded_for: bool = True     # behind Render/Docker proxies the client IP is in X-Forwarded-For
+    safety_threshold: float = 0.5          # composite safety score below this => is_safe = false, redirect blocked
 
     public_base_url: str = "http://localhost:8000"
     cors_origins: str = "http://localhost:5173"
@@ -41,7 +44,7 @@ class Settings(BaseSettings):
     # Hosted deployment (docs/DEPLOY.md)
     embedded_workers: bool = False         # run the RabbitMQ + Kafka consumers inside the API process
     registration_invite_code: str = ""     # when set, /register requires it (keeps a public shortener from abuse)
-    demo_email: str = ""                   # when set, a read-only demo account with sample links is seeded
+    demo_username: str = ""                # when set, a read-only demo account with sample links is seeded
     demo_password: str = ""
     kafka_security_protocol: str = "PLAINTEXT"   # SASL_SSL for hosted Kafka (e.g. Aiven)
     kafka_sasl_mechanism: str = "SCRAM-SHA-256"

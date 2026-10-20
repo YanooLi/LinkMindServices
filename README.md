@@ -21,21 +21,21 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/uvicorn app.main:app --reload                 # API
 .venv/bin/python -m worker.analysis_worker              # RabbitMQ consumer
 .venv/bin/python -m worker.click_consumer               # Kafka consumer
-.venv/bin/pytest -q                                     # 25 tests, no Docker needed (SQLite + fakeredis)
+.venv/bin/pytest -q                                     # 35 tests, no Docker needed (SQLite + fakeredis)
 ```
 Host ports: Postgres 5433, Redis 6380, RabbitMQ 5672/15672, Kafka 9092.
 
-## API (full schema at /docs)
-| Method | Path | |
-|---|---|---|
-| POST | /api/auth/register · /api/auth/token · GET /api/auth/me | accounts, OAuth2 password flow → JWT |
-| POST | /api/links | shorten one URL (optional custom alias) |
-| POST | /api/links/batch | shorten up to 100 URLs in one transaction |
-| GET | /api/links?cursor=&risk=&q= | keyset-paginated list with filters |
-| GET/DELETE | /api/links/{id} | one link |
-| POST | /api/links/{id}/reanalyze | queue a fresh analysis |
-| GET | /api/links/{id}/stats | daily clicks + top referrers |
-| GET | /r/{code} | redirect (warning page for suspicious, 403 for malicious) |
+## API (full schema at /docs; design in [docs/SmartUrl-api.md](docs/SmartUrl-api.md))
+| Area | Endpoints |
+|---|---|
+| Auth | `POST /auth/register` · `POST /auth/login` (access + refresh JWT) · `POST /auth/refresh` · `GET /auth/config` |
+| Users | `GET/PATCH/DELETE /users/me` · `DELETE /users/me/resources` |
+| Short URLs | `POST /shorten/` · `POST /shorten/batch` · `GET /urls/history` · `GET/DELETE /urls/{short_code}` · `GET /{short_code}` (redirect) |
+| QR codes | `POST /qrcode/` · `GET /qrcode/{id}/image` (PNG on demand) · `GET /qrcode/{id}` (redirect) · `GET /qrcodes/history` · `DELETE /qrcode/{id}` |
+| AI analysis | `GET /ai/analysis/url/{code}` · `GET /ai/analysis/qrcode/{id}` · `POST /ai/reanalyze/{type}/{id}` (202) |
+| Analytics | `GET /analytics/url/{code}` · `GET /analytics/qrcode/{id}` (`granularity=day|week|month`) · `GET /analytics/summary` |
+
+Data model: [docs/SmartUrl-database-schema.md](docs/SmartUrl-database-schema.md) — `users`, `urls`, `qrcodes`, `ai_analyses`, `analytics`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [bench/](bench/) for the load test.
 
@@ -47,5 +47,5 @@ over SSL with client certificates — create the `link.clicks` topic). The UI de
 `VITE_API_URL` pointing at the API.
 
 Public-deployment safeguards: `REGISTRATION_INVITE_CODE` gates sign-up so the shortener cannot be used to mint
-phishing redirects, and `DEMO_EMAIL`/`DEMO_PASSWORD` seed a **read-only** demo account (shown on the login page)
+phishing redirects, and `DEMO_USERNAME`/`DEMO_PASSWORD` seed a **read-only** demo account (shown on the login page)
 with sample links, so visitors can try it without registering.

@@ -13,7 +13,7 @@ import aio_pika
 from redis.asyncio import Redis
 
 from app import cache, db
-from app.analysis.analyzer import analyze_link
+from app.analysis.analyzer import analyze_resource
 from app.config import get_settings
 
 PREFETCH = int(os.environ.get("WORKER_PREFETCH", "8"))
@@ -22,10 +22,11 @@ log = logging.getLogger("analysis_worker")
 
 async def handle(message: aio_pika.abc.AbstractIncomingMessage) -> None:
     async with message.process(requeue=False):
-        link_id = json.loads(message.body)["link_id"]
+        job = json.loads(message.body)
         async with db.SessionLocal() as session:
-            link = await analyze_link(session, link_id)
-        log.info("analyzed link %s -> %s", link_id, link.risk_level.value if link else "missing")
+            row = await analyze_resource(session, job["resource_type"], job["resource_id"])
+        log.info("analyzed %s %s -> %s", job["resource_type"], job["resource_id"],
+                 f"score {row.safety_score}, safe={row.is_safe}" if row else "missing")
 
 
 async def start_consumer() -> aio_pika.abc.AbstractRobustConnection:

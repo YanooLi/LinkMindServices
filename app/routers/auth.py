@@ -1,55 +1,64 @@
+"""docs/SmartUrl-api.md §1: register, login (JWT access + refresh), refresh. Logout is client-side."""
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cache import rate_limit
+from app.config import get_settings
 from app.db import get_session
 from app.models import User
-from app.config import get_settings
-from app.schemas import PublicConfig, Token, UserCreate, UserOut
-from app.security import create_access_token, get_current_user, hash_password, verify_password
+from app.schemas import AccessOut, LoginIn, LoginOut, PublicConfig, RefreshIn, RegisterIn, UserBrief, UserOut
+from app.security import create_access_token, create_refresh_token, decode_token, hash_password, verify_password
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
 
 
 @router.post("/register", response_model=UserOut, status_code=201)
-async def register(body: UserCreate, request: Request, session: AsyncSession = Depends(get_session)):
-    await rate_limit(request, "register", request.client.host if request.client else "?")
+async def register(body: RegisterIn, request: Request, session: AsyncSession = Depends(get_session)):
+    await rate_limit(request, "register", _ip(request))
     code = get_settings().registration_invite_code
     if code and not (body.invite_code and secrets.compare_digest(body.invite_code, code)):
         raise HTTPException(403, "A valid invite code is required to register")
-    email = body.email.lower()
-    if await session.scalar(select(User.id).where(User.email == email)):
-        raise HTTPException(409, "Email already registered")
-    user = User(email=email, hashed_password=hash_password(body.password))
+    email, username = body.email.lower(), body.username
+    clash = await session.scalar(select(User).where(or_(User.email == email, User.username == username)))
+    if clash:
+        raise HTTPException(409, "Username already taken" if clash.username == username else "Email already registered")
+    user = User(username=username, email=email, password_hash=hash_password(body.password))
     session.add(user)
     await session.commit()
     return user
 
 
-@router.post("/token", response_model=Token)
-async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(),
-                session: AsyncSession = Depends(get_session)):
-    """OAuth2 password flow: form fields `username` (the email) and `password`."""
-    await rate_limit(request, "login", request.client.host if request.client else "?")
-    user = await session.scalar(select(User).where(User.email == form.username.lower()))
-    if user is None or not verify_password(form.password, user.hashed_password):
-        raise HTTPException(401, "Incorrect email or password", headers={"WWW-Authenticate": "Bearer"})
-    return Token(access_token=create_access_token(user.id))
+@router.post("/login", response_model=LoginOut)
+async def login(body: LoginIn, request: Request, session: AsyncSession = Depends(get_session)):
+    """Log in with username (or email) and password."""
+    await rate_limit(request, "login", _ip(request))
+    ident = body.username.strip()
+    user = await session.scalar(select(User).where(or_(User.username == ident, User.email == ident.lower())))
+    if user is None or not verify_password(body.password, user.password_hash):
+        raise HTTPException(401, "Incorrect username or password")
+    return LoginOut(access_token=create_access_token(user.id), refresh_token=create_refresh_token(user.id),
+                    expires_in=get_settings().jwt_access_expire, user=UserBrief.model_validate(user))
 
 
-@router.get("/me", response_model=UserOut)
-async def me(user: User = Depends(get_current_user)):
-    return user
+@router.post("/refresh", response_model=AccessOut)
+async def refresh(body: RefreshIn, session: AsyncSession = Depends(get_session)):
+    user_id = decode_token(body.refresh_token, "refresh")
+    if await session.get(User, user_id) is None:
+        raise HTTPException(401, "User no longer exists")
+    return AccessOut(access_token=create_access_token(user_id), expires_in=get_settings().jwt_access_expire)
 
 
 @router.get("/config", response_model=PublicConfig)
 async def public_config():
-    """What the login page needs to know: whether sign-up needs an invite, and the public demo login."""
+    """What the sign-in page needs: whether sign-up needs an invite, and the public read-only demo login."""
     s = get_settings()
-    demo = bool(s.demo_email and s.demo_password)
+    demo = bool(s.demo_username and s.demo_password)
     return PublicConfig(registration_requires_invite=bool(s.registration_invite_code),
-                        demo_email=s.demo_email if demo else None, demo_password=s.demo_password if demo else None)
+                        demo_username=s.demo_username if demo else None, demo_password=s.demo_password if demo else None)
